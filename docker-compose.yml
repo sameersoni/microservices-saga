@@ -1,0 +1,108 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks: [saga]
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks: [saga]
+
+  order-service:
+    build:
+      context: .
+      dockerfile: order_service/Dockerfile
+    environment:
+      DATABASE_PATH: /data/order.db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      LOG_LEVEL: INFO
+    volumes:
+      - order_data:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      - kafka
+    networks: [saga]
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: payment_service/Dockerfile
+    environment:
+      DATABASE_PATH: /data/payment.db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      PAYMENT_FAILURE_RATE: "0.0"
+      LOG_LEVEL: INFO
+    volumes:
+      - payment_data:/data
+    ports:
+      - "8001:8000"
+    depends_on:
+      - kafka
+    networks: [saga]
+
+  inventory-service:
+    build:
+      context: .
+      dockerfile: inventory_service/Dockerfile
+    environment:
+      DATABASE_PATH: /data/inventory.db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      INVENTORY_FAILURE_RATE: "0.0"
+      INITIAL_STOCK: "1000"
+      LOG_LEVEL: INFO
+    volumes:
+      - inventory_data:/data
+    ports:
+      - "8002:8000"
+    depends_on:
+      - kafka
+    networks: [saga]
+
+  saga-orchestrator:
+    build:
+      context: .
+      dockerfile: saga_orchestrator/Dockerfile
+    environment:
+      DATABASE_PATH: /data/orchestrator.db
+      ORDER_SERVICE_URL: http://order-service:8000
+      PAYMENT_SERVICE_URL: http://payment-service:8000
+      INVENTORY_SERVICE_URL: http://inventory-service:8000
+      LOG_LEVEL: INFO
+    volumes:
+      - orchestrator_data:/data
+    ports:
+      - "8003:8000"
+    depends_on:
+      - order-service
+      - payment-service
+      - inventory-service
+    networks: [saga]
+
+networks:
+  saga:
+    driver: bridge
+
+volumes:
+  order_data:
+  payment_data:
+  inventory_data:
+  orchestrator_data:
